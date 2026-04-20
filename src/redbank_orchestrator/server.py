@@ -35,6 +35,7 @@ from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from a2a.utils import new_agent_text_message
 
 from redbank_orchestrator.agent import get_graph_closure
+from redbank_orchestrator.discovery import PeerAgent
 from redbank_orchestrator.tracing import enable_tracing
 
 load_dotenv()
@@ -46,6 +47,7 @@ logger = logging.getLogger(__name__)
 # ── Graph ────────────────────────────────────────────────────────────────────
 
 _graph = None
+_peers: list[PeerAgent] = []
 
 # In Docker: main.py + playground/ + images/ are at /opt/app-root/src/
 # Locally: they're at the agent root (agents/langgraph/redbank_orchestrator/)
@@ -77,6 +79,7 @@ def _listen_port() -> int:
 
 
 def _build_graph():
+    global _peers
     base_url = getenv("BASE_URL")
     model_id = getenv("MODEL_ID")
     if not base_url or not model_id:
@@ -85,6 +88,7 @@ def _build_graph():
         base_url = base_url.rstrip("/") + "/v1"
 
     graph_closure = get_graph_closure(model_id=model_id, base_url=base_url)
+    _peers = getattr(graph_closure, "peers", [])
     return graph_closure()
 
 
@@ -341,33 +345,51 @@ async def _serve_image(request: Request) -> FileResponse:
 def _build_agent_card() -> AgentCard:
     port = _listen_port()
     public_url = getenv("AGENT_PUBLIC_URL", f"http://localhost:{port}").rstrip("/")
+
+    # Build skills dynamically from discovered peers
+    skills: list[AgentSkill] = []
+    for peer in _peers:
+        card = peer.card
+        for skill in card.skills:
+            skills.append(
+                AgentSkill(
+                    id=f"route-{peer.tool_name}-{skill.id}",
+                    name=f"{card.name}: {skill.name}",
+                    description=skill.description,
+                    tags=skill.tags,
+                    examples=skill.examples,
+                )
+            )
+
+    # Fallback if no peers discovered yet (card is built before first request)
+    if not skills:
+        skills.append(
+            AgentSkill(
+                id="orchestrator",
+                name="Multi-Agent Routing",
+                description="Routes user queries to the appropriate specialist agent via A2A discovery.",
+                tags=["orchestrator", "routing", "a2a"],
+                examples=["How do I reset my password?", "What is my account balance?"],
+            )
+        )
+
+    peer_names = (
+        ", ".join(p.card.name for p in _peers) if _peers else "pending discovery"
+    )
+
     return AgentCard(
         name="RedBank Orchestrator Agent",
         description=(
-            "Multi-agent orchestrator that classifies user intent and routes "
-            "queries to specialist agents (Knowledge, Banking Ops) via A2A."
+            f"Multi-agent orchestrator that classifies user intent and routes "
+            f"queries to specialist agents via A2A. "
+            f"Connected peers: {peer_names}."
         ),
         url=f"{public_url}/",
         version="0.1.0",
         default_input_modes=["text"],
         default_output_modes=["text"],
         capabilities=AgentCapabilities(streaming=False),
-        skills=[
-            AgentSkill(
-                id="route-knowledge",
-                name="Knowledge Routing",
-                description="Routes document, policy, and account data queries to the Knowledge Agent.",
-                tags=["banking", "knowledge", "rag"],
-                examples=["How do I reset my password?", "What is my account balance?"],
-            ),
-            AgentSkill(
-                id="route-banking-ops",
-                name="Banking Operations Routing",
-                description="Routes write operations to the Banking Operations Agent.",
-                tags=["banking", "operations", "write"],
-                examples=["Transfer $500 to account 12345.", "Update my address."],
-            ),
-        ],
+        skills=skills,
         supports_authenticated_extended_card=False,
     )
 

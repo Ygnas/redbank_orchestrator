@@ -10,5 +10,6 @@ env:
   optional:
     - PORT
     - CONTAINER_IMAGE
+    - AGENT_URLS
     - KNOWLEDGE_AGENT_URL
     - BANKING_AGENT_URL

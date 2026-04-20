@@ -84,6 +84,7 @@ deploy: _check-env ## Deploy to OpenShift/K8s via Helm
 	    --set image.tag="$${IMAGE_TAG}" \
 	    --set env.BASE_URL="$${BASE_URL}" \
 	    --set env.MODEL_ID="$${MODEL_ID}" \
+	    $${AGENT_URLS:+--set env.AGENT_URLS="$${AGENT_URLS}"} \
 	    $${KNOWLEDGE_AGENT_URL:+--set env.KNOWLEDGE_AGENT_URL="$${KNOWLEDGE_AGENT_URL}"} \
 	    $${BANKING_AGENT_URL:+--set env.BANKING_AGENT_URL="$${BANKING_AGENT_URL}"} && \
 	  echo "" && echo "Waiting for rollout to complete..." && \
@@ -107,6 +108,7 @@ dry-run: _check-env ## Render Helm templates without deploying
 	    --set image.tag="$${IMAGE_TAG}" \
 	    --set env.BASE_URL="$${BASE_URL}" \
 	    --set env.MODEL_ID="$${MODEL_ID}" \
+	    $${AGENT_URLS:+--set env.AGENT_URLS="$${AGENT_URLS}"} \
 	    $${KNOWLEDGE_AGENT_URL:+--set env.KNOWLEDGE_AGENT_URL="$${KNOWLEDGE_AGENT_URL}"} \
 	    $${BANKING_AGENT_URL:+--set env.BANKING_AGENT_URL="$${BANKING_AGENT_URL}"}
 

@@ -1,52 +1,73 @@
-"""RedBank Orchestrator Agent — classifies intent and routes to specialist agents via A2A."""
+"""RedBank Orchestrator Agent — discovers peers via A2A and routes to them dynamically."""
 
+from __future__ import annotations
+
+import asyncio
+import logging
 from os import getenv
 from typing import Callable
 
 from langchain.agents import create_agent
+from langchain_core.tools import StructuredTool
 from langchain_openai import ChatOpenAI
 
-from redbank_orchestrator.tools import ask_knowledge_agent, ask_banking_agent
+from redbank_orchestrator.discovery import PeerAgent, discover_peers
+from redbank_orchestrator.tools import create_tools_from_peers
 
-SYSTEM_PROMPT = """\
+logger = logging.getLogger(__name__)
+
+
+def _build_system_prompt(peers: list[PeerAgent]) -> str:
+    """Build a routing system prompt dynamically from discovered agent cards."""
+    if not peers:
+        return (
+            "You are the RedBank Orchestrator. No downstream agents are currently "
+            "available. Inform the user that the system is starting up or "
+            "misconfigured and suggest they try again shortly."
+        )
+
+    agent_descriptions: list[str] = []
+    for i, peer in enumerate(peers, 1):
+        card = peer.card
+        lines = [f"{i}. **{card.name}** ({peer.tool_name})"]
+        if card.description:
+            lines.append(f"   {card.description}")
+        if card.skills:
+            for skill in card.skills:
+                lines.append(f"   - {skill.name}: {skill.description}")
+                if skill.tags:
+                    lines.append(f"     Tags: {', '.join(skill.tags)}")
+                if skill.examples:
+                    examples = ", ".join(f'"{e}"' for e in skill.examples[:3])
+                    lines.append(f"     Examples: {examples}")
+        agent_descriptions.append("\n".join(lines))
+
+    agents_block = "\n\n".join(agent_descriptions)
+
+    return f"""\
 You are the RedBank Orchestrator, a helpful banking assistant that routes user queries \
-to the right specialist agent. You have access to two downstream agents:
+to the right specialist agent. You have access to the following downstream agents:
 
-1. **Knowledge Agent** (ask_knowledge_agent) — for ALL read-only queries:
-   - Document and policy questions (password reset, FAQ, bank procedures)
-   - Account data retrieval (balance, transaction history, account summary)
-   - Any information lookup
-
-2. **Banking Operations Agent** (ask_banking_agent) — for write operations ONLY:
-   - Updating account details (address, contact info)
-   - Creating transactions (transfers, payments)
-   - Any operation that MODIFIES data
+{agents_block}
 
 ROUTING RULES:
-- If the user asks about documents, policies, or procedures -> ask_knowledge_agent
-- If the user asks about their account balance, transactions, or account info -> ask_knowledge_agent
-- If the user requests an update, change, transfer, or payment -> ask_banking_agent
-- If the user greets you or asks a general question you can answer yourself, respond directly
-- When in doubt about whether a query is read or write, use ask_knowledge_agent first
-
-IMPORTANT:
+- Analyse the user's intent and pick the most appropriate agent tool.
 - Call exactly ONE tool per user query. Do not call multiple tools for the same question.
 - After receiving a tool result, present the answer clearly to the user. Do not call the tool again.
-- If a tool returns an access denied error, explain to the user that the operation requires admin privileges.
-- Always be professional and concise in your responses.
-"""
+- If a tool returns an access denied error, explain to the user that the operation requires appropriate privileges.
+- If the user greets you or asks a general question you can answer yourself, respond directly.
+- Always be professional and concise in your responses."""
 
 
 def get_graph_closure(
-    model_id: str = None,
-    base_url: str = None,
-    api_key: str = None,
+    model_id: str | None = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
 ) -> Callable:
     """Build and return a closure that creates the RedBank Orchestrator LangGraph agent.
 
-    Returns:
-        A function that creates a CompiledGraph agent accepting {"messages": [...]}
-        and returns updated state with the routed response.
+    Peer discovery is performed once during closure creation. The closure
+    can then be called repeatedly to get the compiled graph.
     """
     if not api_key:
         api_key = getenv("API_KEY")
@@ -60,7 +81,29 @@ def get_graph_closure(
     if not is_local and not api_key:
         raise ValueError("API_KEY is required for non-local environments.")
 
-    tools = [ask_knowledge_agent, ask_banking_agent]
+    # Discover peers (runs async in sync context)
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        # We're inside an async context — schedule as a task
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            peers = pool.submit(asyncio.run, discover_peers()).result()
+    else:
+        peers = asyncio.run(discover_peers())
+
+    tools = create_tools_from_peers(peers)
+    system_prompt = _build_system_prompt(peers)
+
+    logger.info(
+        "Orchestrator configured with %d tools: %s",
+        len(tools),
+        [t.name for t in tools],
+    )
 
     chat = ChatOpenAI(
         model=model_id,
@@ -70,6 +113,10 @@ def get_graph_closure(
     )
 
     def get_graph():
-        return create_agent(model=chat, tools=tools, system_prompt=SYSTEM_PROMPT)
+        return create_agent(model=chat, tools=tools, system_prompt=system_prompt)
+
+    # Expose peers on the closure so server.py can read them
+    get_graph.peers = peers  # type: ignore[attr-defined]
+    get_graph.tools = tools  # type: ignore[attr-defined]
 
     return get_graph

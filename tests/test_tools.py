@@ -8,11 +8,55 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.redbank_orchestrator.tools import (
-    ask_knowledge_agent,
-    ask_banking_agent,
     AgentQueryInput,
     _get_auth_token,
+    _build_tool_description,
+    create_tools_from_peers,
 )
+from src.redbank_orchestrator.discovery import PeerAgent, _slugify, get_peer_urls
+
+from a2a.types import AgentCapabilities, AgentCard, AgentSkill
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def _make_card(
+    name: str = "Test Agent",
+    description: str = "A test agent.",
+    skills: list[AgentSkill] | None = None,
+) -> AgentCard:
+    """Create a minimal AgentCard for testing."""
+    if skills is None:
+        skills = [
+            AgentSkill(
+                id="test-skill",
+                name="Test Skill",
+                description="Does test things.",
+                tags=["test"],
+                examples=["Do a test"],
+            )
+        ]
+    return AgentCard(
+        name=name,
+        description=description,
+        url="http://test:8001/",
+        version="0.1.0",
+        default_input_modes=["text"],
+        default_output_modes=["text"],
+        capabilities=AgentCapabilities(streaming=False),
+        skills=skills,
+    )
+
+
+def _make_peer(
+    url: str = "http://test:8001",
+    name: str = "Test Agent",
+    description: str = "A test agent.",
+    skills: list[AgentSkill] | None = None,
+) -> PeerAgent:
+    card = _make_card(name=name, description=description, skills=skills)
+    return PeerAgent(url=url, card=card)
 
 
 # ── Schema tests ─────────────────────────────────────────────────────────────
@@ -30,41 +74,6 @@ def test_agent_query_input_has_description():
     assert "properties" in json_schema
     assert "question" in json_schema["properties"]
     assert "description" in json_schema["properties"]["question"]
-
-
-# ── Tool definition tests ────────────────────────────────────────────────────
-
-
-def test_knowledge_agent_tool_exists():
-    """Test that ask_knowledge_agent tool is properly defined."""
-    assert ask_knowledge_agent is not None
-    assert ask_knowledge_agent.name == "ask_knowledge_agent"
-    assert ask_knowledge_agent.description is not None
-
-
-def test_banking_agent_tool_exists():
-    """Test that ask_banking_agent tool is properly defined."""
-    assert ask_banking_agent is not None
-    assert ask_banking_agent.name == "ask_banking_agent"
-    assert ask_banking_agent.description is not None
-
-
-def test_knowledge_agent_tool_description_content():
-    """Test that knowledge agent tool description covers expected use cases."""
-    desc = ask_knowledge_agent.description.lower()
-    assert "knowledge" in desc or "document" in desc or "read" in desc
-
-
-def test_banking_agent_tool_description_content():
-    """Test that banking agent tool description covers expected use cases."""
-    desc = ask_banking_agent.description.lower()
-    assert "banking" in desc or "write" in desc or "operation" in desc
-
-
-def test_tools_have_args_schema():
-    """Test that both tools have properly configured args schemas."""
-    assert hasattr(ask_knowledge_agent, "args_schema")
-    assert hasattr(ask_banking_agent, "args_schema")
 
 
 # ── Auth token extraction tests ──────────────────────────────────────────────
@@ -91,19 +100,137 @@ def test_get_auth_token_missing_auth_token():
     assert _get_auth_token({"configurable": {}}) is None
 
 
-# ── Tool invocation tests (mocked A2A client) ────────────────────────────────
+# ── Discovery helper tests ──────────────────────────────────────────────────
+
+
+def test_slugify_simple():
+    assert _slugify("Knowledge Agent") == "ask_knowledge_agent"
+
+
+def test_slugify_already_prefixed():
+    assert _slugify("Ask Banking Agent") == "ask_banking_agent"
+
+
+def test_slugify_special_chars():
+    assert _slugify("My Agent (v2)") == "ask_my_agent_v2"
+
+
+def test_get_peer_urls_from_agent_urls():
+    with patch.dict(
+        os.environ, {"AGENT_URLS": "http://a:8001, http://b:8002"}, clear=True
+    ):
+        urls = get_peer_urls()
+    assert urls == ["http://a:8001", "http://b:8002"]
+
+
+def test_get_peer_urls_from_legacy_vars():
+    env = {
+        "KNOWLEDGE_AGENT_URL": "http://knowledge:8001",
+        "BANKING_AGENT_URL": "http://banking:8002",
+    }
+    with patch.dict(os.environ, env, clear=True):
+        urls = get_peer_urls()
+    assert urls == ["http://knowledge:8001", "http://banking:8002"]
+
+
+def test_get_peer_urls_deduplicates():
+    env = {
+        "AGENT_URLS": "http://a:8001,http://b:8002",
+        "KNOWLEDGE_AGENT_URL": "http://a:8001",  # duplicate
+        "BANKING_AGENT_URL": "http://c:8003",
+    }
+    with patch.dict(os.environ, env, clear=True):
+        urls = get_peer_urls()
+    assert urls == ["http://a:8001", "http://b:8002", "http://c:8003"]
+
+
+def test_get_peer_urls_empty():
+    with patch.dict(os.environ, {}, clear=True):
+        urls = get_peer_urls()
+    assert urls == []
+
+
+# ── Tool description builder tests ──────────────────────────────────────────
+
+
+def test_build_tool_description_includes_name():
+    peer = _make_peer(name="Knowledge Agent")
+    desc = _build_tool_description(peer)
+    assert "Knowledge Agent" in desc
+
+
+def test_build_tool_description_includes_skills():
+    peer = _make_peer(
+        skills=[
+            AgentSkill(
+                id="rag",
+                name="RAG Retrieval",
+                description="Retrieves docs from vector store.",
+                tags=["rag"],
+                examples=["Find the password reset policy"],
+            )
+        ]
+    )
+    desc = _build_tool_description(peer)
+    assert "RAG Retrieval" in desc
+    assert "Retrieves docs from vector store" in desc
+    assert "password reset policy" in desc
+
+
+def test_build_tool_description_no_skills():
+    peer = _make_peer(skills=[])
+    desc = _build_tool_description(peer)
+    assert "Test Agent" in desc
+    assert "Capabilities" not in desc
+
+
+# ── Dynamic tool creation tests ─────────────────────────────────────────────
+
+
+def test_create_tools_from_peers_creates_correct_count():
+    peers = [
+        _make_peer(url="http://a:8001", name="Knowledge Agent"),
+        _make_peer(url="http://b:8002", name="Banking Agent"),
+    ]
+    tools = create_tools_from_peers(peers)
+    assert len(tools) == 2
+
+
+def test_create_tools_from_peers_names():
+    peers = [
+        _make_peer(url="http://a:8001", name="Knowledge Agent"),
+        _make_peer(url="http://b:8002", name="Banking Agent"),
+    ]
+    tools = create_tools_from_peers(peers)
+    names = {t.name for t in tools}
+    assert "ask_knowledge_agent" in names
+    assert "ask_banking_agent" in names
+
+
+def test_create_tools_from_peers_empty():
+    tools = create_tools_from_peers([])
+    assert tools == []
+
+
+def test_created_tool_has_args_schema():
+    peers = [_make_peer()]
+    tools = create_tools_from_peers(peers)
+    assert tools[0].args_schema == AgentQueryInput
 
 
 @pytest.mark.asyncio
 @patch("src.redbank_orchestrator.tools.send_a2a_text_message", new_callable=AsyncMock)
-async def test_knowledge_agent_invokes_a2a(mock_send):
-    """Test that ask_knowledge_agent calls the A2A client with correct URL."""
-    mock_send.return_value = "Your account balance is $1,234.56"
+async def test_dynamic_tool_invokes_a2a(mock_send):
+    """Test that a dynamically created tool calls A2A with the correct peer URL."""
+    mock_send.return_value = "Your balance is $1,234.56"
 
-    with patch.dict(os.environ, {"KNOWLEDGE_AGENT_URL": "http://knowledge:8080"}):
-        result = await ask_knowledge_agent.ainvoke({"question": "What is my balance?"})
+    peer = _make_peer(url="http://knowledge:8080", name="Knowledge Agent")
+    tools = create_tools_from_peers([peer])
+    tool = tools[0]
 
-    assert result == "Your account balance is $1,234.56"
+    result = await tool.ainvoke({"question": "What is my balance?"})
+
+    assert result == "Your balance is $1,234.56"
     mock_send.assert_called_once_with(
         "http://knowledge:8080",
         "What is my balance?",
@@ -113,53 +240,23 @@ async def test_knowledge_agent_invokes_a2a(mock_send):
 
 @pytest.mark.asyncio
 @patch("src.redbank_orchestrator.tools.send_a2a_text_message", new_callable=AsyncMock)
-async def test_banking_agent_invokes_a2a(mock_send):
-    """Test that ask_banking_agent calls the A2A client with correct URL."""
-    mock_send.return_value = "Transaction created successfully."
+async def test_dynamic_tool_multiple_peers(mock_send):
+    """Test that each tool routes to its own peer URL."""
+    mock_send.side_effect = ["knowledge response", "banking response"]
 
-    with patch.dict(os.environ, {"BANKING_AGENT_URL": "http://banking:8080"}):
-        result = await ask_banking_agent.ainvoke(
-            {"question": "Transfer $100 to account 123"}
-        )
+    peers = [
+        _make_peer(url="http://knowledge:8001", name="Knowledge Agent"),
+        _make_peer(url="http://banking:8002", name="Banking Agent"),
+    ]
+    tools = create_tools_from_peers(peers)
 
-    assert result == "Transaction created successfully."
-    mock_send.assert_called_once_with(
-        "http://banking:8080",
-        "Transfer $100 to account 123",
-        auth_token=None,
-    )
+    r1 = await tools[0].ainvoke({"question": "q1"})
+    r2 = await tools[1].ainvoke({"question": "q2"})
 
-
-@pytest.mark.asyncio
-@patch("src.redbank_orchestrator.tools.send_a2a_text_message", new_callable=AsyncMock)
-async def test_knowledge_agent_default_url(mock_send):
-    """Test that ask_knowledge_agent uses default URL when env var is not set."""
-    mock_send.return_value = "Response"
-
-    # Clear env var to test default
-    env = os.environ.copy()
-    env.pop("KNOWLEDGE_AGENT_URL", None)
-    with patch.dict(os.environ, env, clear=True):
-        await ask_knowledge_agent.ainvoke({"question": "test"})
-
-    # Should use default localhost:8001
-    call_args = mock_send.call_args
-    assert "localhost:8001" in call_args[0][0]
-
-
-@pytest.mark.asyncio
-@patch("src.redbank_orchestrator.tools.send_a2a_text_message", new_callable=AsyncMock)
-async def test_banking_agent_default_url(mock_send):
-    """Test that ask_banking_agent uses default URL when env var is not set."""
-    mock_send.return_value = "Response"
-
-    env = os.environ.copy()
-    env.pop("BANKING_AGENT_URL", None)
-    with patch.dict(os.environ, env, clear=True):
-        await ask_banking_agent.ainvoke({"question": "test"})
-
-    call_args = mock_send.call_args
-    assert "localhost:8002" in call_args[0][0]
+    assert r1 == "knowledge response"
+    assert r2 == "banking response"
+    assert mock_send.call_args_list[0][0][0] == "http://knowledge:8001"
+    assert mock_send.call_args_list[1][0][0] == "http://banking:8002"
 
 
 if __name__ == "__main__":
