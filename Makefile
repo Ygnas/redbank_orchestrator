@@ -3,6 +3,7 @@ AGENT_NAME     := $(shell python3 -c "import re; print(re.search(r'^name:\s*(.+)
 CHART_DIR      := ./charts/agent
 VALUES_FILE    := values.yaml
 CONTAINER_CLI  := $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null)
+# NS_FLAG is built at deploy time from the NAMESPACE env var (see deploy/dry-run/undeploy targets)
 
 .PHONY: init re-init env run-app run-app-fresh build push build-openshift deploy undeploy test dry-run help
 
@@ -54,9 +55,11 @@ push: ## Push container image to registry
 	  $(CONTAINER_CLI) push "$${CONTAINER_IMAGE}"
 
 build-openshift: ## Build image in-cluster via OpenShift BuildConfig (no podman/docker needed)
-	@oc new-build --strategy=docker --binary --name=$(AGENT_NAME) --to=$(AGENT_NAME):latest 2>/dev/null || true && \
-	  oc start-build $(AGENT_NAME) --from-dir=. --follow && \
-	  NS=$$(oc project -q) && \
+	@source .env 2>/dev/null; \
+	  NS_FLAG=""; [ -z "$${NAMESPACE}" ] || NS_FLAG="--namespace $${NAMESPACE}"; \
+	  oc new-build --strategy=docker --binary --name=$(AGENT_NAME) --to=$(AGENT_NAME):latest $$NS_FLAG 2>/dev/null || true && \
+	  oc start-build $(AGENT_NAME) --from-dir=. --follow $$NS_FLAG && \
+	  NS=$${NAMESPACE:-$$(oc project -q)} && \
 	  echo "" && \
 	  echo "Image built. To deploy, set in .env:" && \
 	  echo "  CONTAINER_IMAGE=image-registry.openshift-image-registry.svc:5000/$$NS/$(AGENT_NAME):latest"
@@ -73,11 +76,13 @@ _check-env:
 deploy: _check-env ## Deploy to OpenShift/K8s via Helm
 	@source .env && \
 	  [ -n "$${CONTAINER_IMAGE}" ] || { echo "ERROR: CONTAINER_IMAGE is not set in .env"; exit 1; } && \
+	  NS_FLAG="" && [ -z "$${NAMESPACE}" ] || NS_FLAG="--namespace $${NAMESPACE}" && \
 	  LAST_SEG="$${CONTAINER_IMAGE##*/}" && if [[ "$$LAST_SEG" == *:* ]]; then IMAGE_REPO="$${CONTAINER_IMAGE%:*}"; IMAGE_TAG="$${LAST_SEG##*:}"; else IMAGE_REPO="$${CONTAINER_IMAGE}"; IMAGE_TAG="latest"; fi && \
 	  trap 'rm -f .helm-secrets.yaml' EXIT && \
 	  umask 077 && \
 	  printf 'secrets:\n  apiKey: "%s"\n' "$${API_KEY}" > .helm-secrets.yaml && \
 	  helm upgrade --install $(AGENT_NAME) $(CHART_DIR) \
+	    $$NS_FLAG \
 	    -f $(VALUES_FILE) \
 	    -f .helm-secrets.yaml \
 	    --set image.repository="$${IMAGE_REPO}" \
@@ -86,20 +91,22 @@ deploy: _check-env ## Deploy to OpenShift/K8s via Helm
 	    --set env.MODEL_ID="$${MODEL_ID}" \
 	    $${AGENT_URLS:+--set env.AGENT_URLS="$${AGENT_URLS}"} && \
 	  echo "" && echo "Waiting for rollout to complete..." && \
-	  if oc rollout status deployment/$(AGENT_NAME) --timeout=120s; then \
-	    ROUTE=$$(oc get route $(AGENT_NAME) -o jsonpath='{.spec.host}' 2>/dev/null || true); \
+	  if oc rollout status deployment/$(AGENT_NAME) $$NS_FLAG --timeout=120s; then \
+	    ROUTE=$$(oc get route $(AGENT_NAME) $$NS_FLAG -o jsonpath='{.spec.host}' 2>/dev/null || true); \
 	    if [ -n "$$ROUTE" ]; then echo "" && echo "Agent is available at: https://$$ROUTE"; fi; \
 	  else \
 	    echo "" && echo "WARNING: Rollout did not complete successfully. Check pod status with:" && \
-	    echo "  oc get pods -l app.kubernetes.io/name=$(AGENT_NAME)" && \
-	    echo "  oc logs deployment/$(AGENT_NAME)"; \
+	    echo "  oc get pods $$NS_FLAG -l app.kubernetes.io/name=$(AGENT_NAME)" && \
+	    echo "  oc logs $$NS_FLAG deployment/$(AGENT_NAME)"; \
 	  fi
 
 dry-run: _check-env ## Render Helm templates without deploying
 	@source .env && \
 	  [ -n "$${CONTAINER_IMAGE}" ] || { echo "ERROR: CONTAINER_IMAGE is not set in .env"; exit 1; } && \
+	  NS_FLAG="" && [ -z "$${NAMESPACE}" ] || NS_FLAG="--namespace $${NAMESPACE}" && \
 	  LAST_SEG="$${CONTAINER_IMAGE##*/}" && if [[ "$$LAST_SEG" == *:* ]]; then IMAGE_REPO="$${CONTAINER_IMAGE%:*}"; IMAGE_TAG="$${LAST_SEG##*:}"; else IMAGE_REPO="$${CONTAINER_IMAGE}"; IMAGE_TAG="latest"; fi && \
 	  helm template $(AGENT_NAME) $(CHART_DIR) \
+	    $$NS_FLAG \
 	    -f $(VALUES_FILE) \
 	    --set secrets.apiKey="REDACTED" \
 	    --set image.repository="$${IMAGE_REPO}" \
@@ -109,7 +116,9 @@ dry-run: _check-env ## Render Helm templates without deploying
 	    $${AGENT_URLS:+--set env.AGENT_URLS="$${AGENT_URLS}"}
 
 undeploy: ## Remove deployment from cluster
-	helm uninstall $(AGENT_NAME)
+	@source .env 2>/dev/null; \
+	  NS_FLAG=""; [ -z "$${NAMESPACE}" ] || NS_FLAG="--namespace $${NAMESPACE}"; \
+	  helm uninstall $(AGENT_NAME) $$NS_FLAG
 
 test: ## Run tests
 	uv run --extra dev python -m pytest tests/
