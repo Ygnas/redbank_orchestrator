@@ -314,6 +314,7 @@ async def _health(_request: Request) -> JSONResponse:
     try:
         _ensure_graph()
     except Exception:
+        logger.exception("Health check failed — graph initialization error")
         return JSONResponse(
             {"status": "unhealthy", "agent_initialized": False}, status_code=503
         )
@@ -423,11 +424,9 @@ app = build_app()
 def main() -> None:
     port = _listen_port()
     logger.info(
-        "RedBank Orchestrator listening on 0.0.0.0:%s; "
-        "knowledge_peer=%s banking_peer=%s",
+        "RedBank Orchestrator listening on 0.0.0.0:%s; peers=%s",
         port,
-        getenv("KNOWLEDGE_AGENT_URL", "http://localhost:8001"),
-        getenv("BANKING_AGENT_URL", "http://localhost:8002"),
+        getenv("AGENT_URLS", ""),
     )
     uvicorn.run(app, host="0.0.0.0", port=port)
 

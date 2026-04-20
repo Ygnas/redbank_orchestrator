@@ -4,19 +4,14 @@ Tools are created at startup from discovered agent cards, so the orchestrator
 automatically adapts when peers are added, removed, or updated.
 """
 
-from __future__ import annotations
-
 import logging
-from typing import TYPE_CHECKING
 
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 from redbank_orchestrator.a2a_client import send_a2a_text_message
-
-if TYPE_CHECKING:
-    from redbank_orchestrator.discovery import PeerAgent
+from redbank_orchestrator.discovery import PeerAgent
 
 logger = logging.getLogger(__name__)
 

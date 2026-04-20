@@ -10,7 +10,7 @@ Usage:
     cd agents/langgraph/redbank_orchestrator
     uv run python examples/mock_agents.py
 
-    # Terminal 2: start the orchestrator (uses KNOWLEDGE_AGENT_URL / BANKING_AGENT_URL from .env)
+    # Terminal 2: start the orchestrator (uses AGENT_URLS from .env)
     make run-app
 
     # Terminal 3: test it

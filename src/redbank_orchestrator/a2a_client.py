@@ -81,6 +81,9 @@ async def send_a2a_text_message(
     async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
         resolver = A2ACardResolver(httpx_client=client, base_url=base)
         card = await resolver.get_agent_card()
+        # Override the card's self-declared URL with the URL we were given,
+        # since the card's url may not be reachable cross-namespace.
+        card.url = f"{base}/"
         a2a = A2AClient(httpx_client=client, agent_card=card)
 
         payload: dict[str, Any] = {

@@ -4,9 +4,7 @@ At startup the orchestrator resolves every peer's
 ``/.well-known/agent-card.json`` and caches the result so tools and the
 system prompt can be built dynamically.
 
-Peer URLs come from two sources (merged, deduplicated):
-  * ``AGENT_URLS`` — comma-separated list of base URLs
-  * ``KNOWLEDGE_AGENT_URL`` / ``BANKING_AGENT_URL`` — legacy env vars
+Peer URLs come from ``AGENT_URLS`` — a comma-separated list of base URLs.
 """
 
 from __future__ import annotations
@@ -30,16 +28,9 @@ def get_peer_urls() -> list[str]:
     """Return a deduplicated, ordered list of peer base URLs from env vars."""
     urls: list[str] = []
 
-    # New-style: comma-separated list
     raw = getenv("AGENT_URLS", "")
     if raw.strip():
         urls.extend(u.strip().rstrip("/") for u in raw.split(",") if u.strip())
-
-    # Legacy individual vars (append if not already present)
-    for var in ("KNOWLEDGE_AGENT_URL", "BANKING_AGENT_URL"):
-        val = getenv(var, "").strip().rstrip("/")
-        if val and val not in urls:
-            urls.append(val)
 
     return urls
 

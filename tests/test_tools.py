@@ -123,27 +123,6 @@ def test_get_peer_urls_from_agent_urls():
     assert urls == ["http://a:8001", "http://b:8002"]
 
 
-def test_get_peer_urls_from_legacy_vars():
-    env = {
-        "KNOWLEDGE_AGENT_URL": "http://knowledge:8001",
-        "BANKING_AGENT_URL": "http://banking:8002",
-    }
-    with patch.dict(os.environ, env, clear=True):
-        urls = get_peer_urls()
-    assert urls == ["http://knowledge:8001", "http://banking:8002"]
-
-
-def test_get_peer_urls_deduplicates():
-    env = {
-        "AGENT_URLS": "http://a:8001,http://b:8002",
-        "KNOWLEDGE_AGENT_URL": "http://a:8001",  # duplicate
-        "BANKING_AGENT_URL": "http://c:8003",
-    }
-    with patch.dict(os.environ, env, clear=True):
-        urls = get_peer_urls()
-    assert urls == ["http://a:8001", "http://b:8002", "http://c:8003"]
-
-
 def test_get_peer_urls_empty():
     with patch.dict(os.environ, {}, clear=True):
         urls = get_peer_urls()

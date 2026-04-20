@@ -84,9 +84,7 @@ deploy: _check-env ## Deploy to OpenShift/K8s via Helm
 	    --set image.tag="$${IMAGE_TAG}" \
 	    --set env.BASE_URL="$${BASE_URL}" \
 	    --set env.MODEL_ID="$${MODEL_ID}" \
-	    $${AGENT_URLS:+--set env.AGENT_URLS="$${AGENT_URLS}"} \
-	    $${KNOWLEDGE_AGENT_URL:+--set env.KNOWLEDGE_AGENT_URL="$${KNOWLEDGE_AGENT_URL}"} \
-	    $${BANKING_AGENT_URL:+--set env.BANKING_AGENT_URL="$${BANKING_AGENT_URL}"} && \
+	    $${AGENT_URLS:+--set env.AGENT_URLS="$${AGENT_URLS}"} && \
 	  echo "" && echo "Waiting for rollout to complete..." && \
 	  if oc rollout status deployment/$(AGENT_NAME) --timeout=120s; then \
 	    ROUTE=$$(oc get route $(AGENT_NAME) -o jsonpath='{.spec.host}' 2>/dev/null || true); \
@@ -108,9 +106,7 @@ dry-run: _check-env ## Render Helm templates without deploying
 	    --set image.tag="$${IMAGE_TAG}" \
 	    --set env.BASE_URL="$${BASE_URL}" \
 	    --set env.MODEL_ID="$${MODEL_ID}" \
-	    $${AGENT_URLS:+--set env.AGENT_URLS="$${AGENT_URLS}"} \
-	    $${KNOWLEDGE_AGENT_URL:+--set env.KNOWLEDGE_AGENT_URL="$${KNOWLEDGE_AGENT_URL}"} \
-	    $${BANKING_AGENT_URL:+--set env.BANKING_AGENT_URL="$${BANKING_AGENT_URL}"}
+	    $${AGENT_URLS:+--set env.AGENT_URLS="$${AGENT_URLS}"}
 
 undeploy: ## Remove deployment from cluster
 	helm uninstall $(AGENT_NAME)

@@ -34,12 +34,11 @@ The orchestrator extracts the `Authorization` header from incoming requests and 
 | `API_KEY` | Yes | LLM API key |
 | `BASE_URL` | Yes | LLM API endpoint (e.g. `https://litellm.example.com/v1`) |
 | `MODEL_ID` | Yes | LLM model identifier (e.g. `llama-scout-17b`) |
-| `KNOWLEDGE_AGENT_URL` | Yes | Knowledge Agent A2A endpoint (e.g. `http://redbank-knowledge-agent:8080`) |
-| `BANKING_AGENT_URL` | Yes | Banking Agent A2A endpoint (e.g. `http://redbank-banking-agent:8080`) |
+| `AGENT_URLS` | No | Comma-separated list of downstream A2A agent base URLs. Agent cards are fetched from each peer's `/.well-known/agent-card.json` at startup. |
 | `CONTAINER_IMAGE` | Yes | Container image reference for build/deploy |
 | `PORT` | No | Server port (default: `8000` locally, `8080` in container) |
 
-In-cluster, set `KNOWLEDGE_AGENT_URL` and `BANKING_AGENT_URL` to the Kubernetes Service DNS names of the downstream agents.
+In-cluster, set `AGENT_URLS` to the Kubernetes Service DNS names of the downstream agents (e.g. `http://knowledge-agent.redbank-demo.svc:8080,http://banking-agent.redbank-demo.svc:8001`).
 
 ## API Endpoints
 
@@ -85,8 +84,7 @@ Edit `.env`:
 API_KEY=<your-llm-api-key>
 BASE_URL=https://litellm-prod.example.com/v1
 MODEL_ID=llama-scout-17b
-KNOWLEDGE_AGENT_URL=http://redbank-knowledge-agent:8080
-BANKING_AGENT_URL=http://redbank-banking-agent:8080
+AGENT_URLS=http://redbank-knowledge-agent:8080,http://redbank-banking-agent:8080
 CONTAINER_IMAGE=image-registry.openshift-image-registry.svc:5000/<namespace>/langgraph-redbank-orchestrator:latest
 ```
 
@@ -141,7 +139,7 @@ The `examples/mock_agents.py` script starts two mock A2A agents locally for end-
 # Terminal 1 — start mock Knowledge Agent (8001) + Banking Agent (8002)
 uv run python examples/mock_agents.py
 
-# Terminal 2 — start the orchestrator (reads KNOWLEDGE_AGENT_URL / BANKING_AGENT_URL from .env)
+# Terminal 2 — start the orchestrator (reads AGENT_URLS from .env)
 make run-app
 
 # Terminal 3 — test

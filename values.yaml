@@ -8,5 +8,3 @@ env:
   MODEL_ID: ""
   BASE_URL: ""
   AGENT_URLS: ""
-  KNOWLEDGE_AGENT_URL: ""
-  BANKING_AGENT_URL: ""
