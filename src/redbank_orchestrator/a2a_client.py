@@ -76,11 +76,15 @@ async def send_a2a_text_message(
 
     headers: dict[str, str] = {}
     if auth_token:
-        headers["Authorization"] = (
-            auth_token
-            if auth_token.lower().startswith("bearer ")
-            else f"Bearer {auth_token}"
-        )
+        # Strip "Bearer " prefix to check if there's an actual token value.
+        # An empty or whitespace-only token (e.g. "Bearer ") would cause
+        # httpx to reject the header as illegal.
+        token_value = auth_token
+        if token_value.lower().startswith("bearer "):
+            token_value = token_value[7:]
+        token_value = token_value.strip()
+        if token_value:
+            headers["Authorization"] = f"Bearer {token_value}"
 
     async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
         resolver = A2ACardResolver(httpx_client=client, base_url=base)

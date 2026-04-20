@@ -14,7 +14,7 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "setuptools>=80.9.0,<82.0.0",
     "httpx>=0.28.0",
-    "a2a-sdk[http-server]>=0.3.25",
+    "a2a-sdk[http-server]>=0.3.25,<1.0.0",
 ]
 
 [project.optional-dependencies]

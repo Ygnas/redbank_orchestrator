@@ -146,10 +146,14 @@ class OrchestratorA2AExecutor(AgentExecutor):
             )
             return
 
-        # Extract auth token from the incoming request's call context
+        # Extract auth token from the incoming HTTP headers.
+        # The SDK's DefaultCallContextBuilder copies all request headers
+        # into call_context.state["headers"] (keys are lowercase).
         auth_token: str | None = None
         if context.call_context and context.call_context.state:
-            auth_token = context.call_context.state.get("auth_token")
+            headers = context.call_context.state.get("headers", {})
+            auth_token = headers.get("authorization")
+            logger.debug("A2A auth: token=%s", "present" if auth_token else "absent")
 
         # Use the A2A context_id as the LangGraph thread_id so that
         # multi-turn conversations within the same context share state.
