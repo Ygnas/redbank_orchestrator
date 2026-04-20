@@ -35,7 +35,8 @@ The orchestrator extracts the `Authorization` header from incoming requests and 
 | `BASE_URL` | Yes | LLM API endpoint (e.g. `https://litellm.example.com/v1`) |
 | `MODEL_ID` | Yes | LLM model identifier (e.g. `llama-scout-17b`) |
 | `AGENT_URLS` | No | Comma-separated list of downstream A2A agent base URLs. Agent cards are fetched from each peer's `/.well-known/agent-card.json` at startup. |
-| `CONTAINER_IMAGE` | Yes | Container image reference for build/deploy |
+| `CONTAINER_IMAGE` | Yes | Container image reference for build/deploy (auto-set by `make build-openshift`) |
+| `NAMESPACE` | No | Target K8s/OpenShift namespace (defaults to current context) |
 | `PORT` | No | Server port (default: `8000` locally, `8080` in container) |
 
 In-cluster, set `AGENT_URLS` to the Kubernetes Service DNS names of the downstream agents (e.g. `http://knowledge-agent.redbank-demo.svc:8080,http://banking-agent.redbank-demo.svc:8001`).
@@ -58,7 +59,23 @@ In-cluster, set `AGENT_URLS` to the Kubernetes Service DNS names of the downstre
 - Knowledge Agent (B) and Banking Agent (C) deployed and accessible in-cluster
 - LLM endpoint accessible from the cluster
 
-### Build
+### 1. Configure
+
+```bash
+make init   # creates .env from .env.example
+```
+
+Edit `.env` with your environment values:
+
+```bash
+API_KEY=<your-llm-api-key>
+BASE_URL=http://localhost:8321/v1
+MODEL_ID=ollama/llama3.1:8b
+AGENT_URLS=http://localhost:8001,http://localhost:8002
+NAMESPACE=redbank-demo
+```
+
+### 2. Build
 
 Build the container image in-cluster via OpenShift BuildConfig:
 
@@ -66,29 +83,15 @@ Build the container image in-cluster via OpenShift BuildConfig:
 make build-openshift
 ```
 
-This prints the image reference to set in `.env`. Alternatively, build and push from a local machine:
+This builds in the configured `NAMESPACE` and automatically sets `CONTAINER_IMAGE` in `.env`.
+
+Alternatively, build and push from a local machine:
 
 ```bash
 make build && make push
 ```
 
-### Configure
-
-```bash
-make init   # creates .env from .env.example
-```
-
-Edit `.env`:
-
-```bash
-API_KEY=<your-llm-api-key>
-BASE_URL=https://litellm-prod.example.com/v1
-MODEL_ID=llama-scout-17b
-AGENT_URLS=http://redbank-knowledge-agent:8080,http://redbank-banking-agent:8080
-CONTAINER_IMAGE=image-registry.openshift-image-registry.svc:5000/<namespace>/langgraph-redbank-orchestrator:latest
-```
-
-### Deploy
+### 3. Deploy
 
 ```bash
 make deploy

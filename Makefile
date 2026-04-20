@@ -55,14 +55,19 @@ push: ## Push container image to registry
 	  $(CONTAINER_CLI) push "$${CONTAINER_IMAGE}"
 
 build-openshift: ## Build image in-cluster via OpenShift BuildConfig (no podman/docker needed)
-	@source .env 2>/dev/null; \
+	@[ -f .env ] || { echo "ERROR: .env not found — run 'make init' and configure it first"; exit 1; } && \
+	  source .env && \
 	  NS_FLAG=""; [ -z "$${NAMESPACE}" ] || NS_FLAG="--namespace $${NAMESPACE}"; \
 	  oc new-build --strategy=docker --binary --name=$(AGENT_NAME) --to=$(AGENT_NAME):latest $$NS_FLAG 2>/dev/null || true && \
 	  oc start-build $(AGENT_NAME) --from-dir=. --follow $$NS_FLAG && \
 	  NS=$${NAMESPACE:-$$(oc project -q)} && \
+	  IMG="image-registry.openshift-image-registry.svc:5000/$$NS/$(AGENT_NAME):latest" && \
+	  sed -i'' 's|^CONTAINER_IMAGE=.*|CONTAINER_IMAGE='"$$IMG"'|' .env && \
 	  echo "" && \
-	  echo "Image built. To deploy, set in .env:" && \
-	  echo "  CONTAINER_IMAGE=image-registry.openshift-image-registry.svc:5000/$$NS/$(AGENT_NAME):latest"
+	  echo "Image built and CONTAINER_IMAGE updated in .env:" && \
+	  echo "  $$IMG" && \
+	  echo "" && \
+	  echo "Next: make deploy"
 
 _check-env:
 	@set -a && source .env 2>/dev/null && set +a; \
