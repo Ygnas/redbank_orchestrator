@@ -99,12 +99,32 @@ def _ensure_graph():
     return _graph
 
 
-async def run_orchestrator(user_text: str, auth_token: str | None = None) -> str:
-    """Shared invoke used by the A2A executor and /chat/completions."""
+async def run_orchestrator(
+    user_text: str,
+    auth_token: str | None = None,
+    context_id: str | None = None,
+) -> str:
+    """Shared invoke used by the A2A executor and /chat/completions.
+
+    Args:
+        user_text: The user's message text.
+        auth_token: Optional Bearer token for downstream identity propagation.
+        context_id: Optional A2A context ID, mapped to LangGraph's ``thread_id``
+            so that successive calls within the same context share conversation
+            history via the checkpointer.
+    """
     graph = _ensure_graph()
-    config: dict[str, Any] = {"recursion_limit": 10}
+    # The MemorySaver checkpointer always requires a thread_id.
+    # Use the A2A context_id when available; otherwise generate a
+    # one-off ID so single-turn calls don't crash.
+    thread_id = context_id or uuid4().hex
+    configurable: dict[str, Any] = {"thread_id": thread_id}
     if auth_token:
-        config["configurable"] = {"auth_token": auth_token}
+        configurable["auth_token"] = auth_token
+    config: dict[str, Any] = {
+        "recursion_limit": 10,
+        "configurable": configurable,
+    }
     out = await graph.ainvoke(
         {"messages": [HumanMessage(content=user_text)]}, config=config
     )
@@ -125,8 +145,22 @@ class OrchestratorA2AExecutor(AgentExecutor):
                 new_agent_text_message("Error: empty user message.")
             )
             return
+
+        # Extract auth token from the incoming request's call context
+        auth_token: str | None = None
+        if context.call_context and context.call_context.state:
+            auth_token = context.call_context.state.get("auth_token")
+
+        # Use the A2A context_id as the LangGraph thread_id so that
+        # multi-turn conversations within the same context share state.
+        a2a_context_id = context.context_id
+
         try:
-            reply = await run_orchestrator(user)
+            reply = await run_orchestrator(
+                user,
+                auth_token=auth_token,
+                context_id=a2a_context_id,
+            )
             await event_queue.enqueue_event(new_agent_text_message(reply))
         except Exception as e:  # noqa: BLE001
             logger.exception("Orchestrator invoke failed")
@@ -154,16 +188,24 @@ def _last_user_text(messages: list[dict[str, Any]]) -> str:
 
 
 async def _stream_sse(
-    user_text: str, model_id: str, auth_token: str | None = None
+    user_text: str,
+    model_id: str,
+    auth_token: str | None = None,
+    context_id: str | None = None,
 ) -> AsyncIterator[str]:
     """Stream OpenAI chat.completion.chunk SSE events."""
     graph = _ensure_graph()
     completion_id = _make_completion_id()
     created = int(time.time())
 
-    config: dict[str, Any] = {"recursion_limit": 10}
+    thread_id = context_id or uuid4().hex
+    configurable: dict[str, Any] = {"thread_id": thread_id}
     if auth_token:
-        config["configurable"] = {"auth_token": auth_token}
+        configurable["auth_token"] = auth_token
+    config: dict[str, Any] = {
+        "recursion_limit": 10,
+        "configurable": configurable,
+    }
 
     try:
         async for event in graph.astream_events(

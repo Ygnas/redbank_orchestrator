@@ -6,7 +6,7 @@ automatically adapts when peers are added, removed, or updated.
 
 import logging
 
-from langchain_core.runnables import RunnableConfig
+from langchain_core.runnables import RunnableConfig, ensure_config
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
@@ -28,6 +28,17 @@ def _get_auth_token(config: RunnableConfig | None) -> str | None:
     """Extract the auth token from the LangGraph RunnableConfig."""
     if config and "configurable" in config:
         return config["configurable"].get("auth_token")
+    return None
+
+
+def _get_context_id(config: RunnableConfig | None) -> str | None:
+    """Extract the A2A context ID from the LangGraph RunnableConfig.
+
+    The context_id is stored as ``thread_id`` in the configurable dict
+    because that is how it is mapped from the A2A layer.
+    """
+    if config and "configurable" in config:
+        return config["configurable"].get("thread_id")
     return None
 
 
@@ -68,8 +79,18 @@ def create_tools_from_peers(peers: list[PeerAgent]) -> list[StructuredTool]:
             *,
             _p: PeerAgent = _peer,
         ) -> str:
-            auth_token = _get_auth_token(config)
-            return await send_a2a_text_message(_p.url, question, auth_token=auth_token)
+            # ensure_config reads from the LangChain context variable,
+            # which carries the RunnableConfig even when StructuredTool
+            # does not inject it into the function signature directly.
+            cfg = ensure_config(config)
+            auth_token = _get_auth_token(cfg)
+            context_id = _get_context_id(cfg)
+            return await send_a2a_text_message(
+                _p.url,
+                question,
+                auth_token=auth_token,
+                context_id=context_id,
+            )
 
         tool = StructuredTool.from_function(
             coroutine=_invoke,

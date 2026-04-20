@@ -58,6 +58,7 @@ async def send_a2a_text_message(
     base_url: str,
     text: str,
     auth_token: str | None = None,
+    context_id: str | None = None,
     timeout: float = 120.0,
 ) -> str:
     """Fetch agent card, send one user text message, return assistant text.
@@ -66,6 +67,9 @@ async def send_a2a_text_message(
         base_url: Base URL of the downstream A2A agent.
         text: The user's message text to forward.
         auth_token: Optional Bearer token for AuthBridge identity propagation.
+        context_id: Optional A2A context ID to propagate to the downstream
+            agent.  When set the downstream agent can use this to maintain
+            conversation state across related interactions.
         timeout: HTTP timeout in seconds.
     """
     base = base_url.rstrip("/")
@@ -86,19 +90,29 @@ async def send_a2a_text_message(
         card.url = f"{base}/"
         a2a = A2AClient(httpx_client=client, agent_card=card)
 
+        message_payload: dict[str, Any] = {
+            "role": "user",
+            "parts": [{"kind": "text", "text": text}],
+            "messageId": uuid4().hex,
+        }
+        if context_id:
+            message_payload["contextId"] = context_id
+
         payload: dict[str, Any] = {
-            "message": {
-                "role": "user",
-                "parts": [{"kind": "text", "text": text}],
-                "messageId": uuid4().hex,
-            },
+            "message": message_payload,
         }
         req = SendMessageRequest(
             id=str(uuid4()),
             params=MessageSendParams(**payload),
         )
 
-        logger.info("A2A -> peer=%s id=%s text_len=%d", base, req.id, len(text))
+        logger.info(
+            "A2A -> peer=%s id=%s context=%s text_len=%d",
+            base,
+            req.id,
+            context_id or "(none)",
+            len(text),
+        )
 
         try:
             resp = await a2a.send_message(req)

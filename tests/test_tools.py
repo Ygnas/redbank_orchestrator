@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from src.redbank_orchestrator.tools import (
     AgentQueryInput,
     _get_auth_token,
+    _get_context_id,
     _build_tool_description,
     create_tools_from_peers,
 )
@@ -98,6 +99,37 @@ def test_get_auth_token_missing_configurable():
 def test_get_auth_token_missing_auth_token():
     """Test that None is returned when auth_token is not in configurable."""
     assert _get_auth_token({"configurable": {}}) is None
+
+
+# ── Context ID extraction tests ─────────────────────────────────────────────
+
+
+def test_get_context_id_from_config():
+    """Test that context_id (stored as thread_id) is extracted from RunnableConfig."""
+    config = {"configurable": {"thread_id": "ctx-abc-123"}}
+    assert _get_context_id(config) == "ctx-abc-123"
+
+
+def test_get_context_id_missing_config():
+    """Test that None is returned when config is None."""
+    assert _get_context_id(None) is None
+
+
+def test_get_context_id_missing_configurable():
+    """Test that None is returned when configurable is missing."""
+    assert _get_context_id({}) is None
+
+
+def test_get_context_id_missing_thread_id():
+    """Test that None is returned when thread_id is not in configurable."""
+    assert _get_context_id({"configurable": {}}) is None
+
+
+def test_get_context_id_with_auth_token_present():
+    """Test that context_id is extracted even when auth_token is also present."""
+    config = {"configurable": {"auth_token": "Bearer tok", "thread_id": "ctx-456"}}
+    assert _get_context_id(config) == "ctx-456"
+    assert _get_auth_token(config) == "Bearer tok"
 
 
 # ── Discovery helper tests ──────────────────────────────────────────────────
@@ -214,6 +246,7 @@ async def test_dynamic_tool_invokes_a2a(mock_send):
         "http://knowledge:8080",
         "What is my balance?",
         auth_token=None,
+        context_id=None,
     )
 
 
@@ -236,6 +269,58 @@ async def test_dynamic_tool_multiple_peers(mock_send):
     assert r2 == "banking response"
     assert mock_send.call_args_list[0][0][0] == "http://knowledge:8001"
     assert mock_send.call_args_list[1][0][0] == "http://banking:8002"
+
+
+# ── Context propagation through tools ────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+@patch("src.redbank_orchestrator.tools.send_a2a_text_message", new_callable=AsyncMock)
+async def test_dynamic_tool_propagates_context_id(mock_send):
+    """Test that context_id (thread_id) from RunnableConfig is forwarded to A2A."""
+    mock_send.return_value = "response with context"
+
+    peer = _make_peer(url="http://knowledge:8080", name="Knowledge Agent")
+    tools = create_tools_from_peers([peer])
+    tool = tools[0]
+
+    config = {"configurable": {"thread_id": "ctx-multi-turn-123"}}
+    result = await tool.ainvoke({"question": "follow-up question"}, config=config)
+
+    assert result == "response with context"
+    mock_send.assert_called_once_with(
+        "http://knowledge:8080",
+        "follow-up question",
+        auth_token=None,
+        context_id="ctx-multi-turn-123",
+    )
+
+
+@pytest.mark.asyncio
+@patch("src.redbank_orchestrator.tools.send_a2a_text_message", new_callable=AsyncMock)
+async def test_dynamic_tool_propagates_both_auth_and_context(mock_send):
+    """Test that both auth_token and context_id are forwarded when present."""
+    mock_send.return_value = "authenticated contextual response"
+
+    peer = _make_peer(url="http://banking:8080", name="Banking Agent")
+    tools = create_tools_from_peers([peer])
+    tool = tools[0]
+
+    config = {
+        "configurable": {
+            "auth_token": "Bearer my-jwt-token",
+            "thread_id": "ctx-session-456",
+        }
+    }
+    result = await tool.ainvoke({"question": "transfer $100"}, config=config)
+
+    assert result == "authenticated contextual response"
+    mock_send.assert_called_once_with(
+        "http://banking:8080",
+        "transfer $100",
+        auth_token="Bearer my-jwt-token",
+        context_id="ctx-session-456",
+    )
 
 
 if __name__ == "__main__":

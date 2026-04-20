@@ -10,6 +10,7 @@ from typing import Callable
 from langchain.agents import create_agent
 from langchain_core.tools import StructuredTool
 from langchain_openai import ChatOpenAI
+from langgraph.checkpoint.memory import MemorySaver
 
 from redbank_orchestrator.discovery import PeerAgent, discover_peers
 from redbank_orchestrator.tools import create_tools_from_peers
@@ -56,6 +57,8 @@ ROUTING RULES:
 - After receiving a tool result, present the answer clearly to the user. Do not call the tool again.
 - If a tool returns an access denied error, explain to the user that the operation requires appropriate privileges.
 - If the user greets you or asks a general question you can answer yourself, respond directly.
+- If the user's request is ambiguous or you need more information to pick the right agent, ask a clarifying question instead of guessing.
+- This is a multi-turn conversation — the user may refer to previous messages. Use context from earlier turns when interpreting follow-up requests.
 - Always be professional and concise in your responses."""
 
 
@@ -112,8 +115,18 @@ def get_graph_closure(
         base_url=base_url,
     )
 
+    # MemorySaver keeps conversation history keyed by thread_id,
+    # which we map to the A2A context_id so multi-turn conversations
+    # within the same A2A context share state.
+    checkpointer = MemorySaver()
+
     def get_graph():
-        return create_agent(model=chat, tools=tools, system_prompt=system_prompt)
+        return create_agent(
+            model=chat,
+            tools=tools,
+            system_prompt=system_prompt,
+            checkpointer=checkpointer,
+        )
 
     # Expose peers on the closure so server.py can read them
     get_graph.peers = peers  # type: ignore[attr-defined]
