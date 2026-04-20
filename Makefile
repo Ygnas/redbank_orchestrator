@@ -83,18 +83,19 @@ deploy: _check-env ## Deploy to OpenShift/K8s via Helm
 	  [ -n "$${CONTAINER_IMAGE}" ] || { echo "ERROR: CONTAINER_IMAGE is not set in .env"; exit 1; } && \
 	  NS_FLAG="" && [ -z "$${NAMESPACE}" ] || NS_FLAG="--namespace $${NAMESPACE}" && \
 	  LAST_SEG="$${CONTAINER_IMAGE##*/}" && if [[ "$$LAST_SEG" == *:* ]]; then IMAGE_REPO="$${CONTAINER_IMAGE%:*}"; IMAGE_TAG="$${LAST_SEG##*:}"; else IMAGE_REPO="$${CONTAINER_IMAGE}"; IMAGE_TAG="latest"; fi && \
-	  trap 'rm -f .helm-secrets.yaml' EXIT && \
+	  trap 'rm -f .helm-secrets.yaml .helm-env.yaml' EXIT && \
 	  umask 077 && \
 	  printf 'secrets:\n  apiKey: "%s"\n' "$${API_KEY}" > .helm-secrets.yaml && \
+	  printf 'env:\n  AGENT_URLS: "%s"\n' "$${AGENT_URLS}" > .helm-env.yaml && \
 	  helm upgrade --install $(AGENT_NAME) $(CHART_DIR) \
 	    $$NS_FLAG \
 	    -f $(VALUES_FILE) \
 	    -f .helm-secrets.yaml \
+	    -f .helm-env.yaml \
 	    --set image.repository="$${IMAGE_REPO}" \
 	    --set image.tag="$${IMAGE_TAG}" \
 	    --set env.BASE_URL="$${BASE_URL}" \
-	    --set env.MODEL_ID="$${MODEL_ID}" \
-	    $${AGENT_URLS:+--set env.AGENT_URLS="$${AGENT_URLS}"} && \
+	    --set env.MODEL_ID="$${MODEL_ID}" && \
 	  echo "" && echo "Waiting for rollout to complete..." && \
 	  if oc rollout status deployment/$(AGENT_NAME) $$NS_FLAG --timeout=120s; then \
 	    ROUTE=$$(oc get route $(AGENT_NAME) $$NS_FLAG -o jsonpath='{.spec.host}' 2>/dev/null || true); \
@@ -110,15 +111,17 @@ dry-run: _check-env ## Render Helm templates without deploying
 	  [ -n "$${CONTAINER_IMAGE}" ] || { echo "ERROR: CONTAINER_IMAGE is not set in .env"; exit 1; } && \
 	  NS_FLAG="" && [ -z "$${NAMESPACE}" ] || NS_FLAG="--namespace $${NAMESPACE}" && \
 	  LAST_SEG="$${CONTAINER_IMAGE##*/}" && if [[ "$$LAST_SEG" == *:* ]]; then IMAGE_REPO="$${CONTAINER_IMAGE%:*}"; IMAGE_TAG="$${LAST_SEG##*:}"; else IMAGE_REPO="$${CONTAINER_IMAGE}"; IMAGE_TAG="latest"; fi && \
+	  trap 'rm -f .helm-env.yaml' EXIT && \
+	  printf 'env:\n  AGENT_URLS: "%s"\n' "$${AGENT_URLS}" > .helm-env.yaml && \
 	  helm template $(AGENT_NAME) $(CHART_DIR) \
 	    $$NS_FLAG \
 	    -f $(VALUES_FILE) \
+	    -f .helm-env.yaml \
 	    --set secrets.apiKey="REDACTED" \
 	    --set image.repository="$${IMAGE_REPO}" \
 	    --set image.tag="$${IMAGE_TAG}" \
 	    --set env.BASE_URL="$${BASE_URL}" \
-	    --set env.MODEL_ID="$${MODEL_ID}" \
-	    $${AGENT_URLS:+--set env.AGENT_URLS="$${AGENT_URLS}"}
+	    --set env.MODEL_ID="$${MODEL_ID}"
 
 undeploy: ## Remove deployment from cluster
 	@source .env 2>/dev/null; \

@@ -52,8 +52,25 @@ async def _fetch_card(url: str, timeout: float = 15.0) -> AgentCard | None:
             card = await resolver.get_agent_card()
             logger.info("Discovered peer: %s (%s)", card.name, url)
             return card
-    except Exception:
-        logger.warning("Failed to discover peer at %s", url, exc_info=True)
+    except httpx.ConnectError:
+        logger.warning(
+            "Peer not reachable at %s — service may not be deployed yet.",
+            url,
+        )
+        return None
+    except httpx.TimeoutException:
+        logger.warning(
+            "Peer discovery timed out for %s after %.0fs — service may be starting up.",
+            url,
+            timeout,
+        )
+        return None
+    except Exception as exc:
+        logger.warning(
+            "Peer discovery failed for %s: %s",
+            url,
+            exc,
+        )
         return None
 
 
@@ -94,9 +111,11 @@ async def discover_peers(
     cards = await asyncio.gather(*[_fetch_card(u, timeout) for u in urls])
 
     peers: list[PeerAgent] = []
+    failed_urls: list[str] = []
     seen_names: set[str] = set()
     for url, card in zip(urls, cards):
         if card is None:
+            failed_urls.append(url)
             continue
         peer = PeerAgent(url=url, card=card)
         # Ensure unique tool names
@@ -105,5 +124,18 @@ async def discover_peers(
         seen_names.add(peer.tool_name)
         peers.append(peer)
 
-    logger.info("Peer discovery complete: %d/%d agents resolved", len(peers), len(urls))
+    if failed_urls:
+        logger.warning(
+            "Peer discovery: %d/%d agents resolved, %d unavailable: %s",
+            len(peers),
+            len(urls),
+            len(failed_urls),
+            ", ".join(failed_urls),
+        )
+    else:
+        logger.info(
+            "Peer discovery complete: %d/%d agents resolved",
+            len(peers),
+            len(urls),
+        )
     return peers
