@@ -1,4 +1,4 @@
-nameOverride: "langgraph-redbank-orchestrator"
+nameOverride: "redbank-orchestrator"
 
 extraLabels:
   kagenti.io/type: agent

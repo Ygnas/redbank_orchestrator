@@ -106,13 +106,13 @@ This runs `helm upgrade --install` with the shared chart and then applies Kagent
 
 ```bash
 # Health check
-curl -s https://$(oc get route langgraph-redbank-orchestrator -o jsonpath='{.spec.host}')/health
+curl -s https://$(oc get route redbank-orchestrator -o jsonpath='{.spec.host}')/health
 
 # Agent card
-curl -s https://$(oc get route langgraph-redbank-orchestrator -o jsonpath='{.spec.host}')/.well-known/agent-card.json
+curl -s https://$(oc get route redbank-orchestrator -o jsonpath='{.spec.host}')/.well-known/agent-card.json
 
 # Chat
-curl -s https://$(oc get route langgraph-redbank-orchestrator -o jsonpath='{.spec.host}')/chat/completions \
+curl -s https://$(oc get route redbank-orchestrator -o jsonpath='{.spec.host}')/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"messages":[{"role":"user","content":"What is my account balance?"}]}'
 ```

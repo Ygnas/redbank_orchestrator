@@ -62,7 +62,7 @@ build-openshift: ## Build image in-cluster via OpenShift BuildConfig (no podman/
 	  oc start-build $(AGENT_NAME) --from-dir=. --follow $$NS_FLAG && \
 	  NS=$${NAMESPACE:-$$(oc project -q)} && \
 	  IMG="image-registry.openshift-image-registry.svc:5000/$$NS/$(AGENT_NAME):latest" && \
-	  sed -i'' 's|^CONTAINER_IMAGE=.*|CONTAINER_IMAGE='"$$IMG"'|' .env && \
+	  sed -i '' 's|^CONTAINER_IMAGE=.*|CONTAINER_IMAGE='"$$IMG"'|' .env && \
 	  echo "" && \
 	  echo "Image built and CONTAINER_IMAGE updated in .env:" && \
 	  echo "  $$IMG" && \

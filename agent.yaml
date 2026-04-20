@@ -1,4 +1,4 @@
-name: langgraph-redbank-orchestrator
+name: redbank-orchestrator
 displayName: "RedBank Orchestrator Agent"
 framework: langgraph
 description: "Multi-agent orchestrator that classifies user intent and routes queries to specialist agents (Knowledge, Banking Ops) via A2A protocol."
